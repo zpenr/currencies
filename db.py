@@ -1,4 +1,25 @@
-import sqlite3, json
+import sqlite3
+
+def make_template_for_ExchangeRates(row):
+    template  = {
+                "id": row[0],
+                "baseCurrency": {
+                    "id": row[1],
+                    "name": row[9],
+                    "code": row[10],
+                    "sign": row[11]
+                },
+                "targetCurrency": {
+                    "id": row[2],
+                    "name": row[5],
+                    "code": row[6],
+                    "sign": row[7]
+                },
+                "rate": row[3]
+            }
+    return template
+
+
 
 def create_table_Currencies():
     with sqlite3.connect('currencies.db') as connection:
@@ -77,27 +98,27 @@ def get_all_currencies():
                 "code": row[2],
                 "sign": row[3]
             })
-        return json.dumps(mass)
+        return mass
     
 def get_currency_by_code(code):
     with sqlite3.connect('currencies.db') as connetion:
         cursor = connetion.cursor()
         cursor.execute('''SELECT * FROM currencies WHERE code = ?''', (code,))
-        table = cursor.fetchall()
-        mass = list()
-        for row in table:
-            mass.append({
-                "id": row[0],
-                "name": row[1],
-                "code": row[2],
-                "sign": row[3]
-            })
-        return json.dumps(mass)
+        table = cursor.fetchone()
+        if table:
+            ans = {
+                    "id": table[0],
+                    "name": table[1],
+                    "code": table[2],
+                    "sign": table[3]
+                }
+            return ans
+        return None
     
 def add_currency(currency_data):
     with sqlite3.connect('currencies.db') as connection:
         cursor = connection.cursor()
-        cursor.execute('''INSERT INTO currencies (id, name, code, sign) VALUES ((SELECT max(id)+1 FROM currencies), ?,?,?)''', (*currency_data['name'],*currency_data['code'],*currency_data['sign'],))
+        cursor.execute('''INSERT INTO currencies (name, code, sign) VALUES (?,?,?)''', (currency_data.get('name',[None])[0],currency_data.get('code',[None])[0],currency_data.get('sign',[None])[0],))
     
 def delete_currency_by_code(code):
     with sqlite3.connect('currencies.db') as connection:
@@ -122,23 +143,8 @@ def get_all_exchangeRates():
         table = cursor.fetchall()
         mass = list()
         for row in table:
-            mass.append({
-                "id": row[0],
-                "baseCurrency": {
-                    "id": row[1],
-                    "name": row[9],
-                    "code": row[10],
-                    "sign": row[11]
-                },
-                "targetCurrency": {
-                    "id": row[2],
-                    "name": row[5],
-                    "code": row[6],
-                    "sign": row[7]
-                },
-                "rate": row[3]
-            })
-        return json.dumps(mass)
+            mass.append(make_template_for_ExchangeRates(row))
+        return mass
     
 def get_exchangeRates_by_codes(frm,to):
     with sqlite3.connect('currencies.db') as connection:
@@ -155,33 +161,23 @@ def get_exchangeRates_by_codes(frm,to):
                         FROM ExchangeRates  
                         INNER JOIN currencies ON currencies.id = ExchangeRates.TargetCurrencyId) as ER 
                         INNER JOIN currencies ON currencies.id = ER.BaseCurrencyId WHERE t_code = ? AND code = ? ''', (to,frm,))
-        table = cursor.fetchall()
-        mass = list()
-        for row in table:
-            mass.append({
-                "id": row[0],
-                "baseCurrency": {
-                    "id": row[1],
-                    "name": row[9],
-                    "code": row[10],
-                    "sign": row[11]
-                },
-                "targetCurrency": {
-                    "id": row[2],
-                    "name": row[5],
-                    "code": row[6],
-                    "sign": row[7]
-                },
-                "rate": row[3]
-            })
-        return json.dumps(mass)
+        table = cursor.fetchone()
+        if table:
+            return make_template_for_ExchangeRates(table)
+        return None
     
+def add_exchangeRate(base_currency, target_currency, rate):
+    with sqlite3.connect('currencies.db') as connection:
+        cursor = connection.cursor()
+        cursor.execute('''INSERT INTO ExchangeRates (BaseCurrencyId,TargetCurrencyId,rate) VALUES ((SELECT id FROM currencies WHERE code = ?),(SELECT id FROM currencies WHERE code = ?),?);''',(base_currency,target_currency,rate,))
+
 def update_exchangeRates(base_currency, target_currency, rate):
     with sqlite3.connect('currencies.db') as connection:
         cursor = connection.cursor()
         cursor.execute('''update ExchangeRates set rate = ? 
                        where BaseCurrencyId = (select id from currencies where code = ?) 
                        and TargetCurrencyId = (select id from currencies where code = ?);''', (rate, base_currency, target_currency,))
+        
         cursor.execute('''SELECT * FROM (SELECT 
                             ExchangeRates.ID, 
                             ExchangeRates.BaseCurrencyId, 
@@ -194,32 +190,38 @@ def update_exchangeRates(base_currency, target_currency, rate):
                         FROM ExchangeRates  
                         INNER JOIN currencies ON currencies.id = ExchangeRates.TargetCurrencyId) as ER 
                         INNER JOIN currencies ON currencies.id = ER.BaseCurrencyId WHERE t_code = ? AND code = ? ''', (target_currency,base_currency,))
-        
-        table = cursor.fetchall()
-        mass = list()
-        for row in table:
-            mass.append({
-                "id": row[0],
-                "baseCurrency": {
-                    "id": row[1],
-                    "name": row[9],
-                    "code": row[10],
-                    "sign": row[11]
-                },
-                "targetCurrency": {
-                    "id": row[2],
-                    "name": row[5],
-                    "code": row[6],
-                    "sign": row[7]
-                },
-                "rate": row[3]
-            })
-        return json.dumps(mass)
+
+        table = cursor.fetchone()
+        if table:
+            return make_template_for_ExchangeRates(table)
+        return None
     
-def exchange(frm, to, amount):
-   exp = json.loads(get_exchangeRates_by_codes(frm,to))
-   exp[-1].update({'amount': int(amount), "convertedAmount": int(amount)*exp[-1]['rate']})
-   return json.dumps(exp)
+def exchange(base_code, target_code, amount):
+    amount = float(amount)
+    rate_data = get_exchangeRates_by_codes(base_code, target_code)
+    if rate_data:
+        rate = rate_data['rate']
+        converted = round(amount * rate, 2)
+        return {"baseCurrency": rate_data['baseCurrency'], "targetCurrency": rate_data['targetCurrency'], 
+                "rate": rate, "amount": amount, "convertedAmount": converted}
+
+    rate_data = get_exchangeRates_by_codes(target_code, base_code)
+    if rate_data:
+        rate = round(1 / rate_data['rate'], 6)
+        converted = round(amount * rate, 2)
+        return {"baseCurrency": rate_data['targetCurrency'], "targetCurrency": rate_data['baseCurrency'], 
+                "rate": rate, "amount": amount, "convertedAmount": converted}
+
+    usd_to_base = get_exchangeRates_by_codes('USD', base_code)
+    usd_to_target = get_exchangeRates_by_codes('USD', target_code)
+    
+    if usd_to_base and usd_to_target:
+        rate = round(usd_to_target['rate'] / usd_to_base['rate'], 6)
+        converted = round(amount * rate, 2)
+        return {"baseCurrency": usd_to_base['targetCurrency'], "targetCurrency": usd_to_target['targetCurrency'], 
+                "rate": rate, "amount": amount, "convertedAmount": converted}
+
+    return None
 
 if __name__ == '__main__':
     create_table_Currencies()
