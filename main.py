@@ -3,10 +3,16 @@ import db
 from errors import *
 from urllib.parse import parse_qs, urlparse
 import re, json
+import api_keys
 
 def basic_errors_handler(func):
     def wrapper(self, *args, **kwargs):
         try: 
+            api_key = self.headers.get("X-API-KEY")
+            if api_key not in api_keys.API_KEYS:
+                self.send_json_response(401, {"error": "Invalid or missing API Key"})
+                return
+            
             return func(self, *args, **kwargs)
         except APIError as e:
             self.send_json_response(e.code,{"error":e.message})
@@ -19,6 +25,7 @@ class MyHandler(BaseHTTPRequestHandler):
     def send_json_response(self, code, data):
         self.send_response(code)
         self.send_header("Content-type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(json.dumps(data).encode("utf-8"))
 
