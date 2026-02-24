@@ -110,12 +110,16 @@ class MyHandler(BaseHTTPRequestHandler):
             answer = db.update_exchangeRates(base_currency, target_currency, currency_data.get('rate', [None])[0])
             self.send_json_response(200, answer)
 
-host_name = "localhost"
+host_name = "0.0.0.0"
 server_port = 8000
 
 web_server = HTTPServer((host_name,server_port), MyHandler)
 
-try:
+try: 
+    db.create_table_Currencies()
+    db.add_base_records_to_Currencies()
+    db.create_table_ExchangeRates()
+    db.add_base_records_to_ExchangeRates()
     web_server.serve_forever()
 except KeyboardInterrupt:
     print("STOP")
